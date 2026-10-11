@@ -13,6 +13,7 @@ Public API:
   * `parse_pytest`    — pytest
   * `parse_go_test`   — `go test -v`
   * `parse_cargo_test`— `cargo test`
+  * `parse_cargo_nextest` — `cargo nextest run`
   * `parse_jest`      — Jest / Mocha / Vitest
   * `parse_unittest`  — `python -m unittest` / Django's runner
 
@@ -29,7 +30,7 @@ from __future__ import annotations
 
 import re
 
-from repo2rlenv.log_parsers.cargo_parser import parse_cargo_test
+from repo2rlenv.log_parsers.cargo_parser import parse_cargo_nextest, parse_cargo_test
 from repo2rlenv.log_parsers.go_parser import parse_go_test
 from repo2rlenv.log_parsers.jest_parser import parse_jest
 from repo2rlenv.log_parsers.pytest_parser import TestStatus, parse_pytest
@@ -37,6 +38,7 @@ from repo2rlenv.log_parsers.unittest_parser import parse_unittest
 
 __all__ = [
     "TestStatus",
+    "parse_cargo_nextest",
     "parse_cargo_test",
     "parse_go_test",
     "parse_jest",
@@ -49,7 +51,7 @@ __all__ = [
 def _detect_runner(test_cmds: list[str]) -> str:
     """Inspect the bootstrap-recorded test commands and name the runner.
 
-    Returns one of: "pytest", "unittest", "go", "cargo", "jest", "unknown".
+    Returns one of: "pytest", "unittest", "go", "cargo", "nextest", "jest", "unknown".
 
     Why inspect test_cmds rather than the LanguageHint alone? A single
     language often has multiple runners — Python has pytest + unittest +
@@ -66,6 +68,8 @@ def _detect_runner(test_cmds: list[str]) -> str:
         return "unittest"
     if re.search(r"\bgo\s+test\b", joined):
         return "go"
+    if re.search(r"\bcargo\s+nextest\b", joined):
+        return "nextest"
     if re.search(r"\bcargo\s+test\b", joined):
         return "cargo"
     # Jest is usually invoked via `npm test`, `npx jest`, `yarn test`, or
@@ -118,6 +122,8 @@ def parse_logs(
         return parse_go_test(log)
     if runner == "cargo":
         return parse_cargo_test(log)
+    if runner == "nextest":
+        return parse_cargo_nextest(log)
     if runner == "jest":
         return parse_jest(log)
     return {}

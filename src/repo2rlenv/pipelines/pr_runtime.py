@@ -638,6 +638,8 @@ def normalize_test_cmds_for_runtime(test_cmds: list[str]) -> list[str]:
         - Add `-v` if missing (default `go test` doesn't print --- PASS lines)
       cargo test:
         - Default output is already parseable; no transform needed
+      cargo nextest run:
+        - Add `--status-level pass` (or raise a lower one) and `--color never`
       jest / mocha / npm test:
         - Add `--verbose` if not present, so per-test ✓/✕ lines are emitted
         - Some configs swallow stdout via `--silent`; we strip that
@@ -686,6 +688,21 @@ def normalize_test_cmds_for_runtime(test_cmds: list[str]) -> list[str]:
             if not re.search(r"\s-v\b", cleaned):
                 # Insert -v right after `go test`; positional args go after
                 cleaned = re.sub(r"\bgo\s+test\b", "go test -v", cleaned, count=1)
+
+        # --- cargo nextest ---
+        elif re.search(r"\bcargo\s+nextest\s+run\b", cleaned):
+            # A repo's nextest config can lower `status-level` and hide the
+            # PASS lines that FAIL_TO_PASS needs, so ask for them explicitly.
+            # Flags go right after `run`: anything after `--` goes to the tests.
+            cleaned = re.sub(
+                r"\s+--status-level(?:=|\s+)(?:none|fail|retry|slow|leak)\b", "", cleaned
+            )
+            extra = ""
+            if not re.search(r"\s--status-level\b", cleaned):
+                extra += " --status-level pass"
+            if not re.search(r"\s--color\b", cleaned):
+                extra += " --color never"
+            cleaned = re.sub(r"\bcargo\s+nextest\s+run\b", r"\g<0>" + extra, cleaned, count=1)
 
         # --- cargo test ---
         elif re.search(r"\bcargo\s+test\b", cleaned):

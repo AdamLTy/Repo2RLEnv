@@ -256,6 +256,44 @@ def parse_cargo_test(log: str) -> dict[str, str]:
     return out
 
 
+# Keep these patterns in sync with log_parsers/cargo_parser.py.
+_NEXTEST_RE = re.compile(
+    r"^\s*(?P<status>[A-Z][A-Z0-9 +/-]*?) \[\s*(?:(?P<running>>)?\s*\d+(?:\.\d+)?s)?\s*\] "
+    r"(?:\[\d+/\d+\] )?(?:\((?:\s*\d+/\d+|[-─]+)\) )?(?P<name>\S+ \S.*?)\s*$"
+)
+_NEXTEST_PASSED_RE = re.compile(
+    r"PASS|LEAK|TIMEOUT-PASS|SLOW|SLOW \+ LEAK|SLOW\+TMPASS|FLAKY \d+/\d+"
+    r"|TRY \d+ (?:PASS|LEAK|TMPASS)"
+)
+_NEXTEST_FAILED_RE = re.compile(
+    r"FAIL|FAIL \+ LEAK|LEAK-FAIL|TIMEOUT|XFAIL|ABORT|ABORT SIG \d+|SIG[A-Z0-9]+|FLKY-FL \d+/\d+"
+    r"|TRY \d+ (?!START$|SLOW$|TRMNTG$)(?:[A-Z0-9+]+|SIG \d+)"
+)
+
+
+def parse_cargo_nextest(log: str) -> dict[str, str]:
+    """{"binary-id test::name" -> status} from `cargo nextest run` output.
+
+    Lines still in progress (`SLOW [> 60.000s]`) are skipped; on retries the
+    last line for a test wins.
+    """
+    out: dict[str, str] = {}
+    if not log:
+        return out
+    for raw in log.split("\n"):
+        m = _NEXTEST_RE.match(_ANSI_RE.sub("", raw))
+        if not m or m.group("running"):
+            continue
+        status = m.group("status")
+        if status == "SKIP":
+            out[m.group("name")] = SKIPPED
+        elif _NEXTEST_PASSED_RE.fullmatch(status):
+            out[m.group("name")] = PASSED
+        elif _NEXTEST_FAILED_RE.fullmatch(status):
+            out[m.group("name")] = FAILED
+    return out
+
+
 _JEST_FILE_RE = re.compile(r"^ ?(?:PASS|FAIL)\s+(?:\S+\s+)*?(?P<path>\S+\.[mc]?[jt]sx?)(?=\s|$)")
 _JEST_FILE_MARKER_RE = re.compile(_JEST_FILE_RE.pattern, re.MULTILINE)
 _JEST_TEST_RE = re.compile(
@@ -394,6 +432,8 @@ def _detect_runner(test_cmds: str) -> str:
         return "unittest"
     if re.search(r"\bgo\s+test\b", joined):
         return "go"
+    if re.search(r"\bcargo\s+nextest\b", joined):
+        return "nextest"
     if re.search(r"\bcargo\s+test\b", joined):
         return "cargo"
     if any(k in joined for k in ("jest", "mocha", "vitest", "npm test", "yarn test", "pnpm test")):
@@ -411,6 +451,8 @@ def parse_logs(runner: str, log: str) -> dict[str, str]:
         return parse_go_test(log)
     if runner == "cargo":
         return parse_cargo_test(log)
+    if runner == "nextest":
+        return parse_cargo_nextest(log)
     if runner == "jest":
         return parse_jest(log)
     return {}
@@ -532,7 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--log", required=True, help="captured test-run log file")
     p.add_argument("--f2p", required=True, help="JSON file: FAIL_TO_PASS test names")
     p.add_argument("--p2p", required=True, help="JSON file: PASS_TO_PASS test names")
-    p.add_argument("--runner", default="", help="pytest|unittest|go|cargo|jest (else auto-detect)")
+    p.add_argument(
+        "--runner", default="", help="pytest|unittest|go|cargo|nextest|jest (else auto-detect)"
+    )
     p.add_argument("--test-cmds", default="", help="test command string (runner auto-detect)")
     p.add_argument("--exit-code", type=int, default=1, help="test suite exit code (fallback)")
     p.add_argument("--out-dir", default="/logs/verifier", help="where to write reward.{txt,json}")
@@ -600,6 +644,7 @@ if __name__ == "__main__":
 __all__ = [
     "grade",
     "main",
+    "parse_cargo_nextest",
     "parse_cargo_test",
     "parse_go_test",
     "parse_jest",
